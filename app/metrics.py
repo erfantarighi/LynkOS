@@ -15,6 +15,7 @@ log = logging.getLogger("lynkos.metrics")
 SAMPLE_INTERVAL = 2.0  # seconds between samples
 WINDOW_SECONDS = 300   # keep ~5 minutes
 MAX_POINTS = int(WINDOW_SECONDS / SAMPLE_INTERVAL)
+IDLE_STOP_SECONDS = 30.0  # stop sampling shortly after the dashboard stops polling
 
 
 @dataclass
@@ -98,13 +99,21 @@ class MetricsCollector:
         self._stop = asyncio.Event()
         self._prev_cpu: tuple[int, int] | None = None
         self._prev_net: dict[str, tuple[float, int, int]] = {}
+        self._last_access = 0.0
+        self._lock = asyncio.Lock()
 
     async def start(self) -> None:
-        await self.stop()
-        self._stop = asyncio.Event()
-        self._task = asyncio.create_task(self._loop(), name="lynkos.metrics")
-        log.info("metrics collector started (interval=%ss, window=%ss)",
-                 SAMPLE_INTERVAL, WINDOW_SECONDS)
+        async with self._lock:
+            self._last_access = time.monotonic()
+            if self._task and not self._task.done():
+                return
+            self._stop = asyncio.Event()
+            self._task = asyncio.create_task(self._loop(), name="lynkos.metrics")
+            log.info(
+                "metrics collector started (interval=%ss, window=%ss)",
+                SAMPLE_INTERVAL,
+                WINDOW_SECONDS,
+            )
 
     async def stop(self) -> None:
         if self._task and not self._task.done():
@@ -114,6 +123,9 @@ class MetricsCollector:
             except asyncio.TimeoutError:
                 self._task.cancel()
         self._task = None
+
+    async def touch(self) -> None:
+        await self.start()
 
     def snapshot(self) -> list[dict]:
         out: list[dict] = []
@@ -132,6 +144,9 @@ class MetricsCollector:
                         self._buf.append(s)
                 except Exception:
                     log.exception("metrics sample failed")
+                if time.monotonic() - self._last_access > IDLE_STOP_SECONDS:
+                    log.info("metrics collector stopped after %.0fs idle", IDLE_STOP_SECONDS)
+                    break
                 try:
                     await asyncio.wait_for(self._stop.wait(), timeout=SAMPLE_INTERVAL)
                 except asyncio.TimeoutError:

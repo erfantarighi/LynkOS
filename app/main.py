@@ -32,12 +32,10 @@ async def lifespan(app: FastAPI):
         except Exception:
             log.exception("ddns runner failed to start")
     try:
-        await metrics_collector.start()
-    except Exception:
-        log.exception("metrics collector failed to start")
-    yield
-    await ddns_runner.stop()
-    await metrics_collector.stop()
+        yield
+    finally:
+        await ddns_runner.stop()
+        await metrics_collector.stop()
 
 
 app = FastAPI(

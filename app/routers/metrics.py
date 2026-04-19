@@ -10,6 +10,7 @@ router = APIRouter(prefix="/api/metrics", tags=["metrics"], dependencies=[Depend
 
 @router.get("/series")
 async def series() -> dict[str, Any]:
+    await collector.touch()
     return {
         "interval_seconds": SAMPLE_INTERVAL,
         "window_seconds": WINDOW_SECONDS,
