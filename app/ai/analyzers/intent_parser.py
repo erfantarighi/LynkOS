@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.ai.providers.base import AIProvider, AIProviderError
+from app.ai.providers.base import AIProvider
 from app.ai.schemas import IntentPlan
 
 SYSTEM_PROMPT = """
@@ -30,16 +30,5 @@ async def parse_intent_plan(text: str, provider: AIProvider | None) -> IntentPla
             actions=[],
             missing_inputs=[],
         )
-    try:
-        raw = await provider.generate_json(SYSTEM_PROMPT, text, IntentPlan.model_json_schema())
-    except AIProviderError:
-        raw = {
-            "intent": "unsupported",
-            "confidence": 0.0,
-            "requires_confirmation": False,
-            "risk_level": "low",
-            "explanation": "The provider could not parse this request safely.",
-            "actions": [],
-            "missing_inputs": [],
-        }
+    raw = await provider.generate_json(SYSTEM_PROMPT, text, IntentPlan.model_json_schema())
     return IntentPlan.model_validate(raw)

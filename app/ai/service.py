@@ -23,7 +23,7 @@ from app.ai.collectors import (
 from app.ai.history import AIHistoryStore
 from app.ai.policies import sanitize_state_for_ai, validate_intent_plan
 from app.ai.providers import MockAIProvider, OpenAIProvider
-from app.ai.providers.base import AIProvider
+from app.ai.providers.base import AIProvider, AIProviderError
 from app.ai.schemas import (
     AIStatusResponse,
     AnomalyListResponse,
@@ -159,7 +159,10 @@ class AIService:
 
     async def parse_intent(self, username: str, text: str) -> IntentPlan:
         self._require_enabled()
-        plan = validate_intent_plan(await parse_intent_plan(text, self._get_provider()))
+        try:
+            plan = validate_intent_plan(await parse_intent_plan(text, self._get_provider()))
+        except AIProviderError as exc:
+            raise HTTPException(status_code=502, detail=f"AI provider error: {exc}") from exc
         self._history.append_audit(
             {
                 "username": username,

@@ -71,3 +71,22 @@ def test_ai_routes_expose_mvp_surface(tmp_path) -> None:
     )
     assert review.status_code == 200
     assert review.json()["ok"] is True
+
+
+def test_ai_parse_surfaces_provider_errors(tmp_path) -> None:
+    client = _client(tmp_path)
+    token = _token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    settings = get_settings()
+    settings.ai_provider = "openai"
+    settings.ai_api_key = ""
+    service._provider = None
+
+    parsed = client.post(
+        "/api/ai/intent/parse",
+        headers=headers,
+        json={"text": "Disable SSH"},
+    )
+    assert parsed.status_code == 502
+    assert "AI provider error" in parsed.text
