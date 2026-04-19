@@ -1,0 +1,62 @@
+#!/bin/bash
+# Write PPPoE peer config + credentials atomically. Runs as root via sudoers.
+# Usage: lynkos-pppoe-setup <username> <interface> <mtu|->
+# Password is read from stdin to keep it off argv / process lists.
+set -euo pipefail
+
+if [ "$#" -ne 3 ]; then
+    echo "usage: $0 <username> <interface> <mtu|->" >&2
+    exit 2
+fi
+
+USERNAME=$1
+IFACE=$2
+MTU=$3
+
+PEER_NAME="lynkos-wan"
+PEER_FILE="/etc/ppp/peers/$PEER_NAME"
+CHAP="/etc/ppp/chap-secrets"
+PAP="/etc/ppp/pap-secrets"
+
+# Reject anything that could break file syntax or introduce shell risk.
+for val in "$USERNAME" "$IFACE" "$MTU"; do
+    case "$val" in
+        ""|*[^A-Za-z0-9._@+-]*) echo "invalid argument: $val" >&2; exit 2;;
+    esac
+done
+
+PASSWORD=$(cat)
+case "$PASSWORD" in
+    *$'\n'*|*\"*|"") echo "invalid password" >&2; exit 2;;
+esac
+
+umask 077
+TMP=$(mktemp /etc/ppp/peers/.lynkos.XXXXXX)
+{
+    echo "# Managed by LynkOS — edits will be overwritten."
+    echo "plugin rp-pppoe.so $IFACE"
+    echo "user \"$USERNAME\""
+    echo "noipdefault"
+    echo "defaultroute"
+    echo "persist"
+    echo "hide-password"
+    echo "noauth"
+    if [ "$MTU" != "-" ]; then
+        echo "mtu $MTU"
+        echo "mru $MTU"
+    fi
+} > "$TMP"
+chmod 0640 "$TMP"
+chgrp dip "$TMP" 2>/dev/null || true
+mv "$TMP" "$PEER_FILE"
+
+# Update chap- and pap-secrets: remove any existing line for this user, append new one.
+for F in "$CHAP" "$PAP"; do
+    touch "$F"
+    chmod 0600 "$F"
+    TMP2=$(mktemp "${F}.XXXXXX")
+    grep -vF "\"$USERNAME\"" "$F" > "$TMP2" || true
+    printf '"%s" * "%s" *\n' "$USERNAME" "$PASSWORD" >> "$TMP2"
+    chmod 0600 "$TMP2"
+    mv "$TMP2" "$F"
+done

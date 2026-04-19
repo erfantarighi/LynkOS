@@ -1,0 +1,61 @@
+#!/bin/bash
+# Manage the NetworkManager dnsmasq drop-in that sources our adblock hosts file.
+# Runs as root via sudoers. The hosts file itself is written by the LynkOS
+# service user at /var/lib/lynkos/adblock/hosts — no privilege needed for that.
+set -euo pipefail
+
+NM_DROPIN=/etc/NetworkManager/dnsmasq-shared.d/lynkos-adblock.conf
+HOSTS_FILE=/var/lib/lynkos/adblock/hosts
+
+die() { echo "$*" >&2; exit 2; }
+
+[ "$#" -ge 1 ] || die "usage: $0 <install|uninstall|reload|prepare>"
+
+case "$1" in
+    prepare)
+        # Create the data dir with the right ownership so the service user can
+        # write the hosts file. Idempotent.
+        if [ "$#" -ne 2 ]; then die "usage: prepare <owner>"; fi
+        owner=$2
+        case "$owner" in ""|*[^A-Za-z0-9._-]*) die "invalid owner";; esac
+        mkdir -p /var/lib/lynkos/adblock
+        chown -R "$owner":"$owner" /var/lib/lynkos
+        chmod 0755 /var/lib/lynkos /var/lib/lynkos/adblock
+        ;;
+    install)
+        mkdir -p /etc/NetworkManager/dnsmasq-shared.d
+        echo "addn-hosts=$HOSTS_FILE" > "$NM_DROPIN"
+        chmod 0644 "$NM_DROPIN"
+        # dnsmasq is launched with --addn-hosts only when the connection starts;
+        # reconfiguring means restarting the running dnsmasq. Cheapest: pkill -HUP
+        # doesn't help (dnsmasq was launched without the flag). Signal NM to
+        # reprocess connections — for the shared hotspot that kills+relaunches dnsmasq.
+        if command -v nmcli >/dev/null; then
+            ap=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null \
+                | awk -F: '$2=="802-11-wireless"{print $1; exit}')
+            if [ -n "${ap:-}" ]; then
+                nmcli connection down "$ap" >/dev/null 2>&1 || true
+                nmcli connection up "$ap" >/dev/null 2>&1 || true
+            fi
+        fi
+        ;;
+    uninstall)
+        rm -f "$NM_DROPIN"
+        if command -v nmcli >/dev/null; then
+            ap=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null \
+                | awk -F: '$2=="802-11-wireless"{print $1; exit}')
+            if [ -n "${ap:-}" ]; then
+                nmcli connection down "$ap" >/dev/null 2>&1 || true
+                nmcli connection up "$ap" >/dev/null 2>&1 || true
+            fi
+        fi
+        ;;
+    reload)
+        # After rewriting the hosts file, tell dnsmasq to re-read it. SIGHUP
+        # reloads addn-hosts without dropping clients.
+        pkill -HUP dnsmasq 2>/dev/null || true
+        ;;
+    *)
+        die "unknown subcommand: $1"
+        ;;
+esac

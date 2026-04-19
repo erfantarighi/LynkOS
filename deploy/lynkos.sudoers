@@ -1,0 +1,38 @@
+# LynkOS: allow the service user to manage WiFi via NetworkManager and
+# PPPoE via traditional ppp/rp-pppoe tooling (pon/poff + helper scripts).
+# Installed to /etc/sudoers.d/lynkos via install.sh (mode 0440).
+__USER__ ALL=(root) NOPASSWD: /usr/bin/nmcli, \
+    /bin/systemctl restart NetworkManager, \
+    /bin/systemctl enable --now ssh.service, \
+    /bin/systemctl disable --now ssh.service, \
+    /usr/bin/pon lynkos-wan, \
+    /usr/bin/pon dsl-provider, \
+    /usr/bin/pon provider, \
+    /usr/bin/poff lynkos-wan, \
+    /usr/bin/poff dsl-provider, \
+    /usr/bin/poff provider, \
+    /usr/local/sbin/lynkos-pppoe-setup, \
+    /usr/local/sbin/lynkos-pppoe-remove, \
+    /usr/local/sbin/lynkos-vlan-setup, \
+    /usr/local/sbin/lynkos-vlan-remove, \
+    /usr/local/sbin/lynkos-wg setup *, \
+    /usr/local/sbin/lynkos-wg add-peer *, \
+    /usr/local/sbin/lynkos-wg del-peer *, \
+    /usr/local/sbin/lynkos-wg peer-config *, \
+    /usr/local/sbin/lynkos-wg list-peers, \
+    /usr/local/sbin/lynkos-wg status, \
+    /usr/local/sbin/lynkos-wg meta, \
+    /usr/local/sbin/lynkos-wg teardown, \
+    /usr/local/sbin/lynkos-fail2ban status *, \
+    /usr/local/sbin/lynkos-fail2ban unban * *, \
+    /usr/local/sbin/lynkos-fail2ban logs *, \
+    /usr/local/sbin/lynkos-adblock install, \
+    /usr/local/sbin/lynkos-adblock uninstall, \
+    /usr/local/sbin/lynkos-adblock reload, \
+    /usr/local/sbin/lynkos-adblock prepare *, \
+    /usr/sbin/ip -4 route add *, \
+    /usr/sbin/ip -4 route del *, \
+    /usr/sbin/ip -4 route replace *, \
+    /usr/sbin/ip -6 route add *, \
+    /usr/sbin/ip -6 route del *, \
+    /usr/sbin/ip -6 route replace *

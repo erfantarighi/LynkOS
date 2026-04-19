@@ -1,0 +1,45 @@
+#!/bin/bash
+# Create a VLAN interface via raw `ip link` (not NetworkManager) so pppd has
+# undisturbed access. Idempotent: if the interface already exists, just ensure
+# it's up. Runs as root via sudoers.
+# Usage: lynkos-vlan-setup <parent> <vid> <name>
+set -euo pipefail
+
+if [ "$#" -ne 3 ]; then
+    echo "usage: $0 <parent> <vid> <name>" >&2
+    exit 2
+fi
+
+PARENT=$1
+VID=$2
+NAME=$3
+
+for v in "$PARENT" "$NAME"; do
+    case "$v" in
+        ""|*[^A-Za-z0-9._@-]*) echo "invalid name: $v" >&2; exit 2;;
+    esac
+done
+case "$VID" in
+    ""|*[^0-9]*) echo "invalid vid: $VID" >&2; exit 2;;
+esac
+if [ "$VID" -lt 1 ] || [ "$VID" -gt 4094 ]; then
+    echo "vid out of range: $VID" >&2; exit 2
+fi
+
+# If NetworkManager already has a connection for this name, drop it so NM
+# stops managing the device — pppd needs raw access.
+if nmcli -t -f NAME connection show 2>/dev/null | grep -qxF "$NAME"; then
+    nmcli connection down "$NAME" 2>/dev/null || true
+    nmcli connection delete "$NAME" 2>/dev/null || true
+fi
+
+# Also tell NM to leave the interface alone if it exists.
+nmcli device set "$NAME" managed no 2>/dev/null || true
+
+if ip link show "$NAME" >/dev/null 2>&1; then
+    ip link set "$NAME" up
+    exit 0
+fi
+
+ip link add link "$PARENT" name "$NAME" type vlan id "$VID"
+ip link set "$NAME" up

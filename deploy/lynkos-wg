@@ -1,0 +1,279 @@
+#!/bin/bash
+# Unified WireGuard helper for LynkOS. Runs as root via sudoers.
+# All state lives under /etc/wireguard/ (created on `setup`):
+#   wg0.conf          → server config (managed by this script)
+#   lynkos.json       → metadata (endpoint, port, subnet, next host index)
+#   clients/<name>.conf → each client's fully rendered config
+set -euo pipefail
+
+WG_DIR=/etc/wireguard
+CONFIG=$WG_DIR/wg0.conf
+META=$WG_DIR/lynkos.json
+CLIENTS_DIR=$WG_DIR/clients
+
+die() { echo "$*" >&2; exit 2; }
+
+_need_setup() {
+    [ -f "$CONFIG" ] || die "wireguard not set up — run setup first"
+    [ -f "$META" ] || die "metadata missing; setup is broken"
+}
+
+_sanitize_name() {
+    case "$1" in
+        ""|*[^A-Za-z0-9._-]*) die "invalid name: $1";;
+    esac
+}
+
+_sync() {
+    # Apply server config changes to the running wg0 without dropping existing tunnels.
+    if wg show wg0 >/dev/null 2>&1; then
+        wg syncconf wg0 <(wg-quick strip wg0) 2>/dev/null || systemctl restart wg-quick@wg0
+    else
+        systemctl restart wg-quick@wg0
+    fi
+}
+
+cmd_setup() {
+    local subnet=$1 port=$2 endpoint=$3
+    case "$subnet" in */*) :;; *) die "invalid subnet";; esac
+    case "$port"   in ''|*[!0-9]*) die "invalid port";; esac
+    [ -n "$endpoint" ] || die "endpoint required"
+
+    if [ -f "$CONFIG" ]; then
+        echo "already initialized"
+        return 0
+    fi
+
+    mkdir -p "$WG_DIR" "$CLIENTS_DIR"
+    chmod 700 "$WG_DIR" "$CLIENTS_DIR"
+
+    umask 077
+    local server_key server_pub server_ip mask
+    server_key=$(wg genkey)
+    server_pub=$(echo "$server_key" | wg pubkey)
+    server_ip=$(python3 -c "import ipaddress,sys; print(next(ipaddress.ip_network(sys.argv[1], strict=False).hosts()))" "$subnet")
+    mask=${subnet##*/}
+
+    cat > "$CONFIG" <<EOF
+# Managed by LynkOS
+[Interface]
+Address = $server_ip/$mask
+ListenPort = $port
+PrivateKey = $server_key
+SaveConfig = false
+PostUp = sysctl -w net.ipv4.ip_forward=1; iptables -t nat -A POSTROUTING -s $subnet -o ppp0 -j MASQUERADE; iptables -I FORWARD -i %i -j ACCEPT; iptables -I FORWARD -o %i -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -s $subnet -o ppp0 -j MASQUERADE; iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT
+EOF
+    chmod 600 "$CONFIG"
+
+    python3 - "$META" "$subnet" "$port" "$endpoint" "$server_pub" "$server_ip" <<'PY'
+import json, sys
+path, subnet, port, endpoint, pub, ip = sys.argv[1:]
+json.dump({
+    "subnet": subnet,
+    "port": int(port),
+    "endpoint": endpoint,
+    "server_public": pub,
+    "server_ip": ip,
+    "next_host": 2,
+}, open(path, "w"), indent=2)
+PY
+    chmod 600 "$META"
+
+    systemctl enable --now wg-quick@wg0
+    echo "ok"
+}
+
+cmd_add_peer() {
+    local name=$1 full=$2
+    _sanitize_name "$name"
+    _need_setup
+    local client_file="$CLIENTS_DIR/$name.conf"
+    [ -f "$client_file" ] && die "peer $name already exists"
+
+    umask 077
+    local peer_key peer_pub psk
+    peer_key=$(wg genkey)
+    peer_pub=$(echo "$peer_key" | wg pubkey)
+    psk=$(wg genpsk)
+
+    local peer_ip subnet port endpoint server_pub
+    read peer_ip subnet port endpoint server_pub < <(python3 - "$META" <<'PY'
+import json, sys, ipaddress
+p = sys.argv[1]
+d = json.load(open(p))
+net = ipaddress.ip_network(d["subnet"], strict=False)
+hosts = list(net.hosts())
+peer_ip = hosts[int(d["next_host"]) - 1]
+print(peer_ip, d["subnet"], d["port"], d["endpoint"], d["server_public"])
+d["next_host"] = int(d["next_host"]) + 1
+json.dump(d, open(p, "w"), indent=2)
+PY
+)
+
+    local allowed
+    if [ "$full" = "yes" ]; then
+        allowed="0.0.0.0/0, ::/0"
+    else
+        allowed="$subnet"
+    fi
+
+    cat > "$client_file" <<EOF
+# LynkOS peer: $name
+# PublicKey: $peer_pub
+[Interface]
+PrivateKey = $peer_key
+Address = $peer_ip/32
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = $server_pub
+PresharedKey = $psk
+Endpoint = $endpoint:$port
+AllowedIPs = $allowed
+PersistentKeepalive = 25
+EOF
+    chmod 600 "$client_file"
+
+    cat >> "$CONFIG" <<EOF
+
+# peer: $name
+[Peer]
+PublicKey = $peer_pub
+PresharedKey = $psk
+AllowedIPs = $peer_ip/32
+EOF
+
+    _sync
+    cat "$client_file"
+}
+
+cmd_del_peer() {
+    local pubkey=$1
+    _need_setup
+    # Strip matching [Peer] block from server config.
+    python3 - "$CONFIG" "$pubkey" <<'PY'
+import sys, re
+path, key = sys.argv[1], sys.argv[2]
+text = open(path).read()
+parts = re.split(r'(?=\n\[Peer\])', text)
+kept = [p for p in parts if not (p.strip().startswith("[Peer]") and key in p)]
+open(path, "w").write("".join(kept))
+PY
+    # Remove the client file whose PublicKey comment matches.
+    if [ -d "$CLIENTS_DIR" ]; then
+        for f in "$CLIENTS_DIR"/*.conf; do
+            [ -f "$f" ] || continue
+            if grep -q "^# PublicKey: $pubkey\$" "$f"; then
+                rm -f "$f"
+            fi
+        done
+    fi
+    _sync
+    echo "ok"
+}
+
+cmd_peer_config() {
+    local name=$1
+    _sanitize_name "$name"
+    local f="$CLIENTS_DIR/$name.conf"
+    [ -f "$f" ] || die "peer $name not found"
+    cat "$f"
+}
+
+cmd_list_peers() {
+    _need_setup
+    python3 - "$CONFIG" "$CLIENTS_DIR" <<'PY'
+import json, os, re, sys
+cfg_path, clients_dir = sys.argv[1], sys.argv[2]
+text = open(cfg_path).read()
+# Each peer block is introduced by "# peer: NAME" then "[Peer]"
+peers = []
+current_name = None
+current = {}
+for line in text.splitlines():
+    s = line.strip()
+    if s.startswith("# peer:"):
+        if current:
+            peers.append(current)
+        current_name = s.split(":", 1)[1].strip()
+        current = {"name": current_name}
+    elif s.startswith("[Peer]"):
+        pass
+    elif s.startswith("PublicKey") and current_name:
+        current["public_key"] = s.split("=", 1)[1].strip()
+    elif s.startswith("AllowedIPs") and current_name:
+        current["allowed_ips"] = s.split("=", 1)[1].strip()
+if current:
+    peers.append(current)
+print(json.dumps(peers))
+PY
+}
+
+cmd_status() {
+    if ! wg show wg0 >/dev/null 2>&1; then
+        echo '{"running": false, "peers": []}'
+        return 0
+    fi
+    python3 - <<'PY'
+import json, subprocess
+out = subprocess.check_output(["wg", "show", "wg0", "dump"], text=True)
+lines = out.strip().splitlines()
+result = {"running": True, "peers": []}
+if not lines:
+    print(json.dumps(result))
+    raise SystemExit
+# First line = interface; subsequent lines = peers
+# Peer format: public-key, psk, endpoint, allowed-ips, latest-handshake, rx, tx, keepalive
+for line in lines[1:]:
+    parts = line.split("\t")
+    if len(parts) < 8:
+        continue
+    result["peers"].append({
+        "public_key": parts[0],
+        "endpoint": parts[2] if parts[2] != "(none)" else None,
+        "allowed_ips": parts[3],
+        "latest_handshake": int(parts[4]) if parts[4].isdigit() else 0,
+        "rx_bytes": int(parts[5]) if parts[5].isdigit() else 0,
+        "tx_bytes": int(parts[6]) if parts[6].isdigit() else 0,
+    })
+print(json.dumps(result))
+PY
+}
+
+cmd_meta() {
+    if [ ! -f "$META" ]; then
+        echo '{"initialized": false}'
+        return 0
+    fi
+    python3 - "$META" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["initialized"] = True
+# Drop anything we shouldn't expose via API
+d.pop("server_private", None)
+print(json.dumps(d))
+PY
+}
+
+cmd_teardown() {
+    systemctl disable --now wg-quick@wg0 2>/dev/null || true
+    rm -rf "$CLIENTS_DIR"
+    rm -f "$CONFIG" "$META"
+    echo "ok"
+}
+
+[ "$#" -ge 1 ] || die "usage: $0 <setup|add-peer|del-peer|peer-config|list-peers|status|meta|teardown> ..."
+
+sub=$1; shift
+case "$sub" in
+    setup)         cmd_setup "$@";;
+    add-peer)      cmd_add_peer "$@";;
+    del-peer)      cmd_del_peer "$@";;
+    peer-config)   cmd_peer_config "$@";;
+    list-peers)    cmd_list_peers "$@";;
+    status)        cmd_status "$@";;
+    meta)          cmd_meta "$@";;
+    teardown)      cmd_teardown "$@";;
+    *) die "unknown subcommand: $sub";;
+esac

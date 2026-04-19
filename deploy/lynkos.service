@@ -1,0 +1,22 @@
+[Unit]
+Description=LynkOS — WiFi router web UI
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+# dip: read /etc/ppp/peers/* (owner root:dip, mode 0640)
+# netdev: manage NetworkManager without nagging
+SupplementaryGroups=dip netdev
+# Let the non-root service bind privileged ports (80/443) without running as root.
+# Do NOT set CapabilityBoundingSet — it would strip SETUID/SETGID and break sudo.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+WorkingDirectory=__INSTALL_DIR__
+EnvironmentFile=/etc/default/lynkos
+ExecStart=__INSTALL_DIR__/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 80
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

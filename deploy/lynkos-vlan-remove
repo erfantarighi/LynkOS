@@ -1,0 +1,22 @@
+#!/bin/bash
+# Remove a VLAN interface created by lynkos-vlan-setup. Runs as root via sudoers.
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+    echo "usage: $0 <name>" >&2
+    exit 2
+fi
+
+NAME=$1
+case "$NAME" in
+    ""|*[^A-Za-z0-9._@-]*) echo "invalid name: $NAME" >&2; exit 2;;
+esac
+
+# Remove any NM artifact first.
+nmcli connection down "$NAME" 2>/dev/null || true
+nmcli connection delete "$NAME" 2>/dev/null || true
+
+if ip link show "$NAME" >/dev/null 2>&1; then
+    ip link set "$NAME" down 2>/dev/null || true
+    ip link delete "$NAME"
+fi

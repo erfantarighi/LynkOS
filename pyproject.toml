@@ -1,0 +1,29 @@
+[project]
+name = "lynkos"
+version = "0.1.0"
+description = "Web UI for managing a Raspberry Pi as a WiFi router (NetworkManager + PPPoE)"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.136.0",
+    "uvicorn[standard]>=0.44.0",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "python-jose[cryptography]>=3.3",
+    "bcrypt>=4.2",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.27",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

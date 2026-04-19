@@ -1,0 +1,24 @@
+#!/bin/bash
+# Remove the LynkOS PPPoE peer + strip credentials. Runs as root via sudoers.
+set -euo pipefail
+
+PEER_NAME="lynkos-wan"
+PEER_FILE="/etc/ppp/peers/$PEER_NAME"
+
+poff "$PEER_NAME" 2>/dev/null || true
+
+USER=""
+if [ -f "$PEER_FILE" ]; then
+    USER=$(awk '/^user /{ gsub(/"/,"",$2); print $2; exit }' "$PEER_FILE" || true)
+    rm -f "$PEER_FILE"
+fi
+
+if [ -n "$USER" ]; then
+    for F in /etc/ppp/chap-secrets /etc/ppp/pap-secrets; do
+        [ -f "$F" ] || continue
+        TMP=$(mktemp "${F}.XXXXXX")
+        grep -vF "\"$USER\"" "$F" > "$TMP" || true
+        chmod 0600 "$TMP"
+        mv "$TMP" "$F"
+    done
+fi

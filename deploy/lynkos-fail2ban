@@ -1,0 +1,38 @@
+#!/bin/bash
+# Narrow sudo wrapper around fail2ban-client + journalctl for LynkOS.
+# Validates arguments so a compromised service can't abuse the broad privilege.
+set -euo pipefail
+
+die() { echo "$*" >&2; exit 2; }
+
+[ "$#" -ge 1 ] || die "usage: $0 <status|unban|logs> ..."
+sub=$1; shift
+
+_check_jail() {
+    case "$1" in
+        ""|*[^A-Za-z0-9_-]*) die "invalid jail name";;
+    esac
+}
+
+case "$sub" in
+    status)
+        [ "$#" -eq 1 ] || die "usage: status <jail>"
+        _check_jail "$1"
+        fail2ban-client status "$1"
+        ;;
+    unban)
+        [ "$#" -eq 2 ] || die "usage: unban <jail> <ip>"
+        _check_jail "$1"
+        case "$2" in
+            ""|*[^0-9a-fA-F.:]*) die "invalid IP";;
+        esac
+        fail2ban-client set "$1" unbanip "$2"
+        ;;
+    logs)
+        n=${1:-50}
+        case "$n" in ''|*[!0-9]*) die "invalid count";; esac
+        [ "$n" -le 500 ] || n=500
+        journalctl -u fail2ban -n "$n" --no-pager -o cat
+        ;;
+    *) die "unknown subcommand: $sub";;
+esac
