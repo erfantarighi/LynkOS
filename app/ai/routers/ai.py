@@ -23,7 +23,7 @@ async def status() -> AIStatusResponse:
     return service.status()
 
 
-@router.post("/insights", response_model=InsightResponse)
+@router.get("/insights", response_model=InsightResponse)
 async def insights() -> InsightResponse:
     return await service.insights()
 

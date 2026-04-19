@@ -42,7 +42,7 @@ def test_ai_routes_expose_mvp_surface(tmp_path) -> None:
     assert status.json()["enabled"] is True
     assert status.json()["provider"] == "mock"
 
-    insights = client.post("/api/ai/insights", headers=headers)
+    insights = client.get("/api/ai/insights", headers=headers)
     assert insights.status_code == 200
     assert "summary" in insights.json()
     assert "generated_at" in insights.json()
