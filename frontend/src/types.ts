@@ -123,3 +123,71 @@ export type SystemStats = {
   rx_bytes: number;
   tx_bytes: number;
 };
+
+export type AIStatus = {
+  enabled: boolean;
+  provider: string;
+  execution_enabled: boolean;
+  available: boolean;
+  reason: string | null;
+};
+
+export type AIInsight = {
+  summary: string;
+  highlights: string[];
+  generated_at: string;
+};
+
+export type AIRecommendation = {
+  id: string;
+  title: string;
+  severity: "low" | "medium" | "high";
+  reason: string;
+  recommended_action: string;
+};
+
+export type AIRecommendationsResponse = {
+  items: AIRecommendation[];
+  generated_at: string;
+};
+
+export type AIAnomaly = {
+  id: string;
+  severity: "low" | "medium" | "high";
+  title: string;
+  explanation: string;
+  detected_at: string;
+};
+
+export type AIAnomaliesResponse = {
+  items: AIAnomaly[];
+  generated_at: string;
+};
+
+export type AIAction =
+  | {
+      type: "create_wireguard_peer";
+      params: { name: string; platform: "mobile" | "desktop" | "generic"; full_tunnel: boolean };
+    }
+  | { type: "disable_ssh"; params: Record<string, never> }
+  | { type: "enable_ssh"; params: Record<string, never> }
+  | { type: "enable_adblock"; params: Record<string, never> }
+  | { type: "disable_adblock"; params: Record<string, never> }
+  | { type: "summarize_network"; params: Record<string, never> }
+  | { type: "explain_anomalies"; params: Record<string, never> };
+
+export type AIIntentPlan = {
+  intent: string;
+  confidence: number;
+  requires_confirmation: boolean;
+  risk_level: "low" | "medium" | "high";
+  explanation: string;
+  actions: AIAction[];
+  missing_inputs: string[];
+};
+
+export type AIExecutionResponse = {
+  ok: boolean;
+  results: { type: string; result: unknown }[];
+  executed_at: string;
+};

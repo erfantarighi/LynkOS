@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     # <install_dir>/data/snapshot.json. Override with LYNKOS_SNAPSHOT_PATH.
     snapshot_path: str = ""
 
+    # AI feature flags / provider selection.
+    ai_enabled: bool = False
+    ai_provider: str = "mock"
+    ai_model: str = "gpt-4.1-mini"
+    ai_api_key: str = ""
+    ai_max_input_bytes: int = 32_768
+    ai_allow_action_execution: bool = False
+    ai_state_cache_seconds: int = 5
+
 
 @lru_cache
 def get_settings() -> Settings:

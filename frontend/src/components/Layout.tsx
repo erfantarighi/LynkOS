@@ -13,6 +13,7 @@ const links = [
   { to: "/security", label: "Security" },
   { to: "/adblock", label: "Adblock" },
   { to: "/clients", label: "Clients" },
+  { to: "/ai", label: "AI" },
 ];
 
 export default function Layout() {

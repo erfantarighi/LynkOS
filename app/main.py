@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.ai.routers import ai as ai_router
 from app.config import get_settings
 from app.ddns import runner as ddns_runner
 from app.metrics import collector as metrics_collector
@@ -70,6 +71,7 @@ app.include_router(adblock.router)
 app.include_router(ssh.router)
 app.include_router(metrics.router)
 app.include_router(system.router)
+app.include_router(ai_router.router)
 
 
 @app.get("/api/health")

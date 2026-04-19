@@ -14,6 +14,7 @@ import Adblock from "./pages/Adblock";
 import Clients from "./pages/Clients";
 import Account from "./pages/Account";
 import Login from "./pages/Login";
+import AIPage from "./pages/AI";
 import { fetcher, getToken } from "./api";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="security" element={<Security />} />
           <Route path="adblock" element={<Adblock />} />
           <Route path="clients" element={<Clients />} />
+          <Route path="ai" element={<AIPage />} />
           <Route path="account" element={<Account />} />
         </Route>
       </Routes>
